@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python 웹 실행기</title>
+    <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body {
+            font-family: monospace;
+            background: #f4f4f4;
+            color: #222;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        h2 {
+            margin-bottom: 20px;
+        }
+        #loader {
+            margin-bottom: 20px;
+        }
+        #bar-wrap {
+            width: 100%;
+            height: 20px;
+            background: #ddd;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #bar {
+            height: 100%;
+            width: 0%;
+            background: #4caf50;
+            transition: width 0.3s;
+        }
+        #status {
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        #controls {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        #controls > div {
+            margin-bottom: 10px;
+        }
+        #fontSlider {
+            width: 200px;
+        }
+        #themeBtn {
+            padding: 6px 12px;
+            cursor: pointer;
+        }
+        .CodeMirror {
+            width: 70%;
+            max-width: 70%;
+            margin: 0 auto 20px auto;
+            min-height: 150px;
+            text-align: left;
+        }
+        #console {
+            width: 70%;
+            max-width: 70%;
+            margin: 0 auto 20px auto;
+            min-height: 300px;
+            background: #fff;
+            color: #000;
+            border: 1px solid #ccc;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            text-align: left;
+        }
+        button {
+            padding: 12px;
+            font-size: 16px;
+            background: #4caf50;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+            max-width: 200px;
+            width: 100%;
+            display: block;
+            margin: 0 auto 20px auto;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #aaa;
+            cursor: not-allowed;
+        }
+        footer {
+            margin-top: 25px;
+            font-size: 12px;
+            color: #555;
+            text-align: center;
+        }
+        @media(max-width:600px) {
+            .CodeMirror,
+            #console,
+            button {
+                font-size: 14px;
+                width: 90%;
+            }
+        }
+        .command {
+            color: #0066cc;
+        }
+        .result {
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Python 웹 실행기</h2>
+    <div id="loader">
+        <div id="status">로딩 중...</div>
+        <div id="bar-wrap">
+            <div id="bar"></div>
+        </div>
+    </div>
+    <div id="controls">
+        <div>
+            글씨 크기: <input type="range" id="fontSlider" min="12" max="24" value="16">
+        </div>
+        <div>
+            <button id="themeBtn">다크/라이트</button>
+        </div>
+    </div>
+    <textarea id="code" placeholder="여기에 Python 코드를 작성하세요" disabled></textarea>
+    <button id="run" disabled>실행</button>
+    <div id="console"></div>
+    <footer>
+        웹 브라우저 환경에서는 파일 I/O, OS 명령어, 무한 루프, 네트워크 직접 요청이 제한됩니다.
+    </footer>
+    <!-- Pyodide -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/closebrackets.min.js"></script>
+    <script>
+        let pyodide;
+        const consoleEl = document.getElementById("console");
+        const codeTextarea = document.getElementById("code");
+        const runBtn = document.getElementById("run");
+        const loader = document.getElementById("loader");
+        const bar = document.getElementById("bar");
+        const status = document.getElementById("status");
+        // CodeMirror 에디터 생성
+        const editor = CodeMirror.fromTextArea(codeTextarea, {
+            mode: "python",
+            lineNumbers: true,
+            matchBrackets: true,
+            autoCloseBrackets: true,
+            theme: "default"
+        });
+        // 글씨 크기 조절
+        const fontSlider = document.getElementById("fontSlider");
+        fontSlider.addEventListener("input", () => {
+            const size = fontSlider.value + "px";
+            editor.getWrapperElement().style.fontSize = size;
+            consoleEl.style.fontSize = size;
+        });
+        let isDark = false;
+        document.getElementById("themeBtn").addEventListener("click", () => {
+            isDark = !isDark;
+            if (isDark) {
+                editor.setOption("theme", "dracula");
+                document.body.style.background = "#222";
+                document.body.style.color = "#eee";
+                consoleEl.style.background = "#111";
+                consoleEl.style.color = "#eee";
+            } else {
+                editor.setOption("theme", "default");
+                document.body.style.background = "#f4f4f4";
+                document.body.style.color = "#222";
+                consoleEl.style.background = "#fff";
+                consoleEl.style.color = "#000";
+            }
+        });
+        function progress(p, text) {
+            bar.style.width = p + "%";
+            if (text) status.textContent = text;
+        }
+        async function loadPy() {
+            let p = 0;
+            const fake = setInterval(() => {
+                if (p < 90) { p += 4; progress(p); }
+            }, 180);
+            progress(5, "Pyodide 로딩 중...");
+            pyodide = await loadPyodide();
+            clearInterval(fake);
+            progress(100, "로딩 완료");
+            pyodide.runPython(`
+import sys
+from js import console
+class Terminal:
+    def write(self,s): console.log(s)
+    def flush(self): pass
+sys.stdout = sys.stderr = Terminal()
+            `);
+            setTimeout(() => loader.remove(), 500);
+            codeTextarea.disabled = false;
+            runBtn.disabled = false;
+            editor.focus();
+        }
+        loadPy();
+        async function runCode(code) {
+            const lines = code.split("\n");
+            let output = "";
+            const log = console.log;
+            console.log = s => output += s + "\n";
+            try {
+                const result = await pyodide.runPythonAsync(code);
+                if (result !== undefined) output += result + "\n";
+            } catch (e) {
+                output += e + "\n";
+            }
+            console.log = log;
+            let formatted = "";
+            for (let line of lines) formatted += `<div class="command">>>> ${line}</div>`;
+            if (output) formatted += `<div class="result">${output}</div>`;
+            consoleEl.innerHTML += formatted;
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+        runBtn.addEventListener("click", () => runCode(editor.getValue()));
+    </script>
+</body>
+</html>
